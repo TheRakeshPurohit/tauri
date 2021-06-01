@@ -1,5 +1,30 @@
 # Changelog
 
+## \[1.0.0-beta.3]
+
+- Support `cargo tauri build` on Apple M1 chip.
+  - Bumped due to a bump in cli.rs.
+  - [3bf853d7](https://www.github.com/tauri-apps/tauri/commit/3bf853d782b491ad4965a1da25d19337eeac161f) feat(cli.rs): support tauri build on M1 chip ([#1915](https://www.github.com/tauri-apps/tauri/pull/1915)) on 2021-05-29
+- Infer `app name` and `window title` from `package.json > productName` or `package.json > name`.
+  Infer `distDir` and `devPath` by reading the package.json and trying to determine the UI framework (Vue.js, Angular, React, Svelte and some UI frameworks).
+  - Bumped due to a bump in cli.rs.
+  - [21a971c3](https://www.github.com/tauri-apps/tauri/commit/21a971c3b76bf0c26d00b2520b4976fa526738f5) feat(cli.rs): infer devPath/distDir/appName from package.json ([#1930](https://www.github.com/tauri-apps/tauri/pull/1930)) on 2021-05-31
+- Watch workspace crates on `dev` command.
+  - Bumped due to a bump in cli.rs.
+  - [86a23ff3](https://www.github.com/tauri-apps/tauri/commit/86a23ff30b4f18effa39c87b7cae6b7e324d131c) added support for cargo workspaces for `dev` command ([#1827](https://www.github.com/tauri-apps/tauri/pull/1827)) on 2021-05-13
+- Adds `features` argument to the `dev` and `build` commands.
+  - Bumped due to a bump in cli.rs.
+  - [6ec8e84d](https://www.github.com/tauri-apps/tauri/commit/6ec8e84d9172c090ee1549db56c98c66f12436ff) feat(cli.rs): add `features` arg to dev/build ([#1828](https://www.github.com/tauri-apps/tauri/pull/1828)) on 2021-05-13
+- Fixes the libwebkit2gtk package name.
+  - Bumped due to a bump in cli.rs.
+  - [e08065d7](https://www.github.com/tauri-apps/tauri/commit/e08065d7fe8398b41180b3a64854ec8e71174d42) fix: deb installation error ([#1844](https://www.github.com/tauri-apps/tauri/pull/1844)) on 2021-05-18
+- Properly keep all `tauri` features that are not managed by the CLI.
+  - Bumped due to a bump in cli.rs.
+  - [17c7c439](https://www.github.com/tauri-apps/tauri/commit/17c7c4396ff2d5e13fc8726c2965b4e810fad6b9) refactor(core): use `attohttpc` by default ([#1861](https://www.github.com/tauri-apps/tauri/pull/1861)) on 2021-05-19
+- Read cargo features from `tauri.conf.json > build > features` and propagate them on `dev` and `build`.
+  - Bumped due to a bump in cli.rs.
+  - [2b814e9c](https://www.github.com/tauri-apps/tauri/commit/2b814e9c937489af0acb56051bd01c0d7fca2413) added cargo features to tauri config ([#1824](https://www.github.com/tauri-apps/tauri/pull/1824)) on 2021-05-13
+
 ## \[1.0.0-beta.2]
 
 - Packages are checked with `!=` instead of `semver` for beta releases.

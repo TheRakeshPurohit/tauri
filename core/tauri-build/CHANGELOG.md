@@ -1,5 +1,14 @@
 # Changelog
 
+## \[1.0.0-beta.1]
+
+- Allow `dev_path` and `dist_dir` to be an array of root files and directories to embed.
+  - Bumped due to a bump in tauri-codegen.
+  - [6ec54c53](https://www.github.com/tauri-apps/tauri/commit/6ec54c53b504eec3873d326b1a45e450227d46ed) feat(core): allow `dev_path`, `dist_dir` as array of paths, fixes [#1897](https://www.github.com/tauri-apps/tauri/pull/1897) ([#1926](https://www.github.com/tauri-apps/tauri/pull/1926)) on 2021-05-31
+- Validate `tauri.conf.json > build > devPath` and `tauri.conf.json > build > distDir` values.
+  - Bumped due to a bump in tauri-codegen.
+  - [e97846aa](https://www.github.com/tauri-apps/tauri/commit/e97846aae933cad5cba284a2a133ae7aaee1107c) feat(core): validate `devPath` and `distDir` values ([#1848](https://www.github.com/tauri-apps/tauri/pull/1848)) on 2021-05-17
+
 ## \[1.0.0-beta.0]
 
 - The `try_build` method now has a `Attributes` argument to allow specifying the window icon path used on Windows.
