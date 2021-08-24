@@ -219,17 +219,18 @@ function getAll(): WebviewWindow[] {
 /** @ignore */
 // events that are emitted right here instead of by the created webview
 const localTauriEvents = ['tauri://created', 'tauri://error']
-
+/** @ignore */
+export type WindowLabel = string | null | undefined
 /**
  * A webview window handle allows emitting and listening to events from the backend that are tied to the window.
  */
 class WebviewWindowHandle {
   /** Window label. */
-  label: string | null
+  label: WindowLabel
   /** Local event listeners. */
   listeners: { [key: string]: Array<EventCallback<any>> }
 
-  constructor(label: string | null) {
+  constructor(label: WindowLabel) {
     this.label = label
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     this.listeners = Object.create(null)
@@ -248,7 +249,7 @@ class WebviewWindowHandle {
   ): Promise<UnlistenFn> {
     if (this._handleTauriEvent(event, handler)) {
       return Promise.resolve(() => {
-        // eslint-disable-next-line security/detect-object-injection
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, security/detect-object-injection
         const listeners = this.listeners[event]
         listeners.splice(listeners.indexOf(handler), 1)
       })
@@ -619,6 +620,26 @@ class WindowManager extends WebviewWindowHandle {
           label: this.label,
           cmd: {
             type: 'unmaximize'
+          }
+        }
+      }
+    })
+  }
+
+  /**
+   * Toggles the window maximized state.
+   *
+   * @returns A promise indicating the success or failure of the operation.
+   */
+  async toggleMaximize(): Promise<void> {
+    return invokeTauriCommand({
+      __tauriModule: 'Window',
+      message: {
+        cmd: 'manage',
+        data: {
+          label: this.label,
+          cmd: {
+            type: 'toggleMaximize'
           }
         }
       }
@@ -1071,7 +1092,7 @@ class WindowManager extends WebviewWindowHandle {
  * ```
  */
 class WebviewWindow extends WindowManager {
-  constructor(label: string | null, options: WindowOptions = {}) {
+  constructor(label: WindowLabel, options: WindowOptions = {}) {
     super(label)
     // @ts-expect-error
     if (!options?.skip) {
@@ -1167,7 +1188,12 @@ async function currentMonitor(): Promise<Monitor | null> {
   return invokeTauriCommand({
     __tauriModule: 'Window',
     message: {
-      cmd: 'currentMonitor'
+      cmd: 'manage',
+      data: {
+        cmd: {
+          type: 'currentMonitor'
+        }
+      }
     }
   })
 }
@@ -1180,7 +1206,12 @@ async function primaryMonitor(): Promise<Monitor | null> {
   return invokeTauriCommand({
     __tauriModule: 'Window',
     message: {
-      cmd: 'primaryMonitor'
+      cmd: 'manage',
+      data: {
+        cmd: {
+          type: 'primaryMonitor'
+        }
+      }
     }
   })
 }
@@ -1190,7 +1221,12 @@ async function availableMonitors(): Promise<Monitor[]> {
   return invokeTauriCommand({
     __tauriModule: 'Window',
     message: {
-      cmd: 'availableMonitors'
+      cmd: 'manage',
+      data: {
+        cmd: {
+          type: 'availableMonitors'
+        }
+      }
     }
   })
 }

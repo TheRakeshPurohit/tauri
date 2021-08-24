@@ -6,7 +6,6 @@
 
 use crate::{window::DetachedWindow, Icon};
 
-#[cfg(feature = "menu")]
 use crate::menu::Menu;
 
 use serde::Deserialize;
@@ -16,18 +15,25 @@ use tauri_utils::config::{WindowConfig, WindowUrl};
 #[cfg(windows)]
 use winapi::shared::windef::HWND;
 
-use std::{collections::HashMap, path::PathBuf};
-
-type UriSchemeProtocol =
-  dyn Fn(&str) -> Result<Vec<u8>, Box<dyn std::error::Error>> + Send + Sync + 'static;
+use std::{fmt, path::PathBuf};
 
 /// The attributes used to create an webview.
 pub struct WebviewAttributes {
   pub url: WindowUrl,
   pub initialization_scripts: Vec<String>,
   pub data_directory: Option<PathBuf>,
-  pub uri_scheme_protocols: HashMap<String, Box<UriSchemeProtocol>>,
   pub file_drop_handler_enabled: bool,
+}
+
+impl fmt::Debug for WebviewAttributes {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("WebviewAttributes")
+      .field("url", &self.url)
+      .field("initialization_scripts", &self.initialization_scripts)
+      .field("data_directory", &self.data_directory)
+      .field("file_drop_handler_enabled", &self.file_drop_handler_enabled)
+      .finish()
+  }
 }
 
 impl WebviewAttributes {
@@ -37,7 +43,6 @@ impl WebviewAttributes {
       url,
       initialization_scripts: Vec::new(),
       data_directory: None,
-      uri_scheme_protocols: Default::default(),
       file_drop_handler_enabled: true,
     }
   }
@@ -54,35 +59,6 @@ impl WebviewAttributes {
     self
   }
 
-  /// Whether the webview URI scheme protocol is defined or not.
-  pub fn has_uri_scheme_protocol(&self, name: &str) -> bool {
-    self.uri_scheme_protocols.contains_key(name)
-  }
-
-  /// Registers a webview protocol handler.
-  /// Leverages [setURLSchemeHandler](https://developer.apple.com/documentation/webkit/wkwebviewconfiguration/2875766-seturlschemehandler) on macOS,
-  /// [AddWebResourceRequestedFilter](https://docs.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2.addwebresourcerequestedfilter?view=webview2-dotnet-1.0.774.44) on Windows
-  /// and [webkit-web-context-register-uri-scheme](https://webkitgtk.org/reference/webkit2gtk/stable/WebKitWebContext.html#webkit-web-context-register-uri-scheme) on Linux.
-  ///
-  /// # Arguments
-  ///
-  /// * `uri_scheme` The URI scheme to register, such as `example`.
-  /// * `protocol` the protocol associated with the given URI scheme. It's a function that takes an URL such as `example://localhost/asset.css`.
-  pub fn register_uri_scheme_protocol<
-    N: Into<String>,
-    H: Fn(&str) -> Result<Vec<u8>, Box<dyn std::error::Error>> + Send + Sync + 'static,
-  >(
-    mut self,
-    uri_scheme: N,
-    protocol: H,
-  ) -> Self {
-    let uri_scheme = uri_scheme.into();
-    self
-      .uri_scheme_protocols
-      .insert(uri_scheme, Box::new(move |data| (protocol)(data)));
-    self
-  }
-
   /// Disables the file drop handler. This is required to use drag and drop APIs on the front end on Windows.
   pub fn disable_file_drop_handler(mut self) -> Self {
     self.file_drop_handler_enabled = false;
@@ -93,7 +69,7 @@ impl WebviewAttributes {
 /// Do **NOT** implement this trait except for use in a custom [`Runtime`](crate::Runtime).
 ///
 /// This trait is separate from [`WindowBuilder`] to prevent "accidental" implementation.
-pub trait WindowBuilderBase: Sized {}
+pub trait WindowBuilderBase: fmt::Debug + Sized {}
 
 /// A builder for all attributes related to a single webview.
 ///
@@ -107,8 +83,6 @@ pub trait WindowBuilder: WindowBuilderBase {
   fn with_config(config: WindowConfig) -> Self;
 
   /// Sets the menu for the window.
-  #[cfg(feature = "menu")]
-  #[cfg_attr(doc_cfg, doc(cfg(feature = "menu")))]
   fn menu(self, menu: Menu) -> Self;
 
   /// Show window in the center of the screen.
@@ -183,24 +157,16 @@ pub trait WindowBuilder: WindowBuilderBase {
   fn has_icon(&self) -> bool;
 
   /// Whether the menu was set or not.
-  #[cfg(feature = "menu")]
-  #[cfg_attr(doc_cfg, doc(cfg(feature = "menu")))]
   fn has_menu(&self) -> bool;
 }
 
 /// Rpc request.
+#[derive(Debug)]
 pub struct RpcRequest {
   /// RPC command.
   pub command: String,
   /// Params.
   pub params: Option<JsonValue>,
-}
-
-/// Uses a custom URI scheme handler to resolve file requests
-pub struct CustomProtocol {
-  /// Handler for protocol
-  #[allow(clippy::type_complexity)]
-  pub protocol: Box<dyn Fn(&str) -> Result<Vec<u8>, Box<dyn std::error::Error>> + Send + Sync>,
 }
 
 /// The file drop event payload.
@@ -222,7 +188,7 @@ pub type WebviewRpcHandler<R> = Box<dyn Fn(DetachedWindow<R>, RpcRequest) + Send
 /// Return `true` in the callback to block the OS' default behavior of handling a file drop.
 pub type FileDropHandler<R> = Box<dyn Fn(FileDropEvent, DetachedWindow<R>) -> bool + Send>;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct InvokePayload {
   #[serde(rename = "__tauriModule")]
   pub tauri_module: Option<String>,

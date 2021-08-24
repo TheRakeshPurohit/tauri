@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: MIT
 
 //! The Tauri configuration used at runtime.
-//! It is pulled from a `tauri.conf.json` file and the [`config::Config`] struct is generated at compile time.
+//!
+//! It is pulled from a `tauri.conf.json` file and the [`Config`] struct is generated at compile time.
 //!
 //! # Stability
 //! This is a core functionality that is not considered part of the stable API.
@@ -198,7 +199,7 @@ impl Default for UpdaterConfig {
 #[derive(PartialEq, Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SecurityConfig {
-  /// Content security policy to inject to HTML files with the custom protocol.
+  /// Content security policy to inject to HTML files with `tauri://` and other user-defined custom protocols.
   pub csp: Option<String>,
 }
 
@@ -209,6 +210,9 @@ pub struct SystemTrayConfig {
   /// Path to the icon to use on the system tray.
   /// Automatically set to be an `.png` on macOS and Linux, and `.ico` on Windows.
   pub icon_path: PathBuf,
+  /// A Boolean value that determines whether the image represents a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc) image on macOS.
+  #[serde(default)]
+  pub icon_as_template: bool,
 }
 
 /// A CLI argument definition
@@ -298,21 +302,30 @@ pub struct CliArg {
   pub index: Option<u64>,
 }
 
-/// The CLI root command definition.
+/// The CLI command definition.
 #[derive(PartialEq, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[allow(missing_docs)] // TODO
 pub struct CliConfig {
+  /// Command description which will be shown on the help information.
   pub description: Option<String>,
+  /// Command long description which will be shown on the help information.
   pub long_description: Option<String>,
+  /// Adds additional help information to be displayed in addition to auto-generated help.
+  /// This information is displayed before the auto-generated help information.
+  /// This is often used for header information.
   pub before_help: Option<String>,
+  /// Adds additional help information to be displayed in addition to auto-generated help.
+  /// This information is displayed after the auto-generated help information.
+  /// This is often used to describe how to use the arguments, or caveats to be noted.
   pub after_help: Option<String>,
+  /// List of arguments for the command
   pub args: Option<Vec<CliArg>>,
+  /// List of subcommands of this command
   pub subcommands: Option<HashMap<String, CliConfig>>,
 }
 
 impl CliConfig {
-  /// List of args for the command
+  /// List of arguments for the command
   pub fn args(&self) -> Option<&Vec<CliArg>> {
     self.args.as_ref()
   }
@@ -391,6 +404,7 @@ pub struct TauriConfig {
   #[serde(default)]
   pub security: SecurityConfig,
   /// System tray configuration.
+  #[serde(default)]
   pub system_tray: Option<SystemTrayConfig>,
 }
 
@@ -422,10 +436,10 @@ pub enum AppUrl {
 #[derive(PartialEq, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildConfig {
-  /// the devPath config.
+  /// Directory path or URL to use on development. Default to `http://localhost:8080`.
   #[serde(default = "default_dev_path")]
   pub dev_path: AppUrl,
-  /// the dist config.
+  /// Distribution directory to use in release build. Default to `../dist`.
   #[serde(default = "default_dist_path")]
   pub dist_dir: AppUrl,
   /// Whether we should inject the Tauri API on `window.__TAURI__` or not.
@@ -463,7 +477,7 @@ pub struct PackageConfig {
   pub version: Option<String>,
 }
 
-/// The tauri.conf.json mapper.
+/// The config type mapped to `tauri.conf.json`.
 #[derive(Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -635,7 +649,7 @@ mod build {
   macro_rules! literal_struct {
     ($tokens:ident, $struct:ident, $($field:ident),+) => {
       $tokens.append_all(quote! {
-        ::tauri::api::config::$struct {
+        ::tauri::utils::config::$struct {
           $($field: #$field),+
         }
       });
@@ -644,7 +658,7 @@ mod build {
 
   impl ToTokens for WindowUrl {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-      let prefix = quote! { ::tauri::api::config::WindowUrl };
+      let prefix = quote! { ::tauri::utils::config::WindowUrl };
 
       tokens.append_all(match self {
         Self::App(path) => {
@@ -821,7 +835,7 @@ mod build {
 
   impl ToTokens for AppUrl {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-      let prefix = quote! { ::tauri::api::config::AppUrl };
+      let prefix = quote! { ::tauri::utils::config::AppUrl };
 
       tokens.append_all(match self {
         Self::Url(url) => {
@@ -866,8 +880,9 @@ mod build {
 
   impl ToTokens for SystemTrayConfig {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+      let icon_as_template = self.icon_as_template;
       let icon_path = path_buf_lit(&self.icon_path);
-      literal_struct!(tokens, SystemTrayConfig, icon_path);
+      literal_struct!(tokens, SystemTrayConfig, icon_path, icon_as_template);
     }
   }
 
@@ -901,7 +916,7 @@ mod build {
         str_lit,
         json_value_lit,
       );
-      tokens.append_all(quote! { ::tauri::api::config::PluginConfig(#config) })
+      tokens.append_all(quote! { ::tauri::utils::config::PluginConfig(#config) })
     }
   }
 

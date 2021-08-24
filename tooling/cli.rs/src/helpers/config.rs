@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 use anyhow::Context;
-#[cfg(target_os = "linux")]
-use heck::KebabCase;
 use json_patch::merge;
 use once_cell::sync::Lazy;
 use serde_json::Value as JsonValue;
@@ -27,6 +25,8 @@ impl From<WixConfig> for tauri_bundler::WixSettings {
       skip_webview_install: config.skip_webview_install,
       license: config.license,
       enable_elevated_update_task: config.enable_elevated_update_task,
+      banner_path: config.banner_path,
+      dialog_image_path: config.dialog_image_path,
     }
   }
 }
@@ -99,12 +99,7 @@ fn get_internal(merge_config: Option<&str>, reload: bool) -> crate::Result<Confi
     merge(&mut config, &platform_config);
   }
 
-  #[allow(unused_mut)]
-  let mut config: Config = serde_json::from_value(config)?;
-  #[cfg(target_os = "linux")]
-  if let Some(product_name) = config.package.product_name.as_mut() {
-    *product_name = product_name.to_kebab_case();
-  }
+  let config: Config = serde_json::from_value(config)?;
   set_var("TAURI_CONFIG", serde_json::to_string(&config)?);
   *config_handle().lock().unwrap() = Some(config);
 
@@ -135,7 +130,6 @@ pub fn all_allowlist_features() -> Vec<&'static str> {
       remove_dir: true,
       remove_file: true,
       rename_file: true,
-      path: true,
     },
     window: WindowAllowlistConfig {
       all: true,
@@ -157,6 +151,8 @@ pub fn all_allowlist_features() -> Vec<&'static str> {
     },
     notification: NotificationAllowlistConfig { all: true },
     global_shortcut: GlobalShortcutAllowlistConfig { all: true },
+    os: OsAllowlistConfig { all: true },
+    path: PathAllowlistConfig { all: true },
   }
   .to_features()
 }

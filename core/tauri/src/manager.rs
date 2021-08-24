@@ -3,33 +3,32 @@
 // SPDX-License-Identifier: MIT
 
 use crate::{
-  api::{
-    assets::Assets,
-    config::{AppUrl, Config, WindowUrl},
-    PackageInfo,
-  },
   app::{AppHandle, GlobalWindowEvent, GlobalWindowEventListener},
   event::{Event, EventHandler, Listeners},
   hooks::{InvokeHandler, OnPageLoad, PageLoadPayload},
   plugin::PluginStore,
   runtime::{
-    webview::{
-      CustomProtocol, FileDropEvent, FileDropHandler, InvokePayload, WebviewRpcHandler,
-      WindowBuilder,
+    http::{
+      HttpRange, MimeType, Request as HttpRequest, Response as HttpResponse,
+      ResponseBuilder as HttpResponseBuilder,
     },
+    webview::{FileDropEvent, FileDropHandler, InvokePayload, WebviewRpcHandler, WindowBuilder},
     window::{dpi::PhysicalSize, DetachedWindow, PendingWindow, WindowEvent},
     Icon, Runtime,
   },
-  App, Context, Invoke, StateManager, Window,
+  utils::{
+    assets::Assets,
+    config::{AppUrl, Config, WindowUrl},
+    PackageInfo,
+  },
+  Context, Invoke, StateManager, Window,
 };
 
 #[cfg(target_os = "windows")]
 use crate::api::path::{resolve_path, BaseDirectory};
 
-#[cfg(feature = "menu")]
 use crate::app::{GlobalMenuEventListener, WindowMenuEvent};
 
-#[cfg(feature = "menu")]
 use crate::{
   runtime::menu::{Menu, MenuEntry, MenuHash, MenuId},
   MenuEvent,
@@ -40,12 +39,14 @@ use serde_json::Value as JsonValue;
 use std::{
   borrow::Cow,
   collections::{HashMap, HashSet},
+  fmt,
   fs::create_dir_all,
+  io::SeekFrom,
   sync::{Arc, Mutex, MutexGuard},
 };
 use tauri_macros::default_runtime;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use url::Url;
-use uuid::Uuid;
 
 const WINDOW_RESIZED_EVENT: &str = "tauri://resize";
 const WINDOW_MOVED_EVENT: &str = "tauri://move";
@@ -54,13 +55,12 @@ const WINDOW_DESTROYED_EVENT: &str = "tauri://destroyed";
 const WINDOW_FOCUS_EVENT: &str = "tauri://focus";
 const WINDOW_BLUR_EVENT: &str = "tauri://blur";
 const WINDOW_SCALE_FACTOR_CHANGED_EVENT: &str = "tauri://scale-change";
-#[cfg(feature = "menu")]
 const MENU_EVENT: &str = "tauri://menu";
 
 #[default_runtime(crate::Wry, wry)]
 pub struct InnerWindowManager<R: Runtime> {
   windows: Mutex<HashMap<String, Window<R>>>,
-  plugins: Mutex<PluginStore<R>>,
+  pub(crate) plugins: Mutex<PluginStore<R>>,
   listeners: Listeners,
   pub(crate) state: Arc<StateManager>,
 
@@ -74,25 +74,51 @@ pub struct InnerWindowManager<R: Runtime> {
   assets: Arc<dyn Assets>,
   default_window_icon: Option<Vec<u8>>,
 
-  /// A list of salts that are valid for the current application.
-  salts: Mutex<HashSet<Uuid>>,
   package_info: PackageInfo,
   /// The webview protocols protocols available to all windows.
-  uri_scheme_protocols: HashMap<String, Arc<CustomProtocol>>,
+  uri_scheme_protocols: HashMap<String, Arc<CustomProtocol<R>>>,
   /// The menu set to all windows.
-  #[cfg(feature = "menu")]
   menu: Option<Menu>,
   /// Maps runtime id to a strongly typed menu id.
-  #[cfg(feature = "menu")]
   menu_ids: HashMap<MenuHash, MenuId>,
   /// Menu event listeners to all windows.
-  #[cfg(feature = "menu")]
   menu_event_listeners: Arc<Vec<GlobalMenuEventListener<R>>>,
   /// Window event listeners to all windows.
   window_event_listeners: Arc<Vec<GlobalWindowEventListener<R>>>,
 }
 
+impl<R: Runtime> fmt::Debug for InnerWindowManager<R> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut s = f.debug_struct("InnerWindowManager");
+    #[allow(unused_mut)]
+    let mut w = s
+      .field("plugins", &self.plugins)
+      .field("state", &self.state)
+      .field("config", &self.config)
+      .field("default_window_icon", &self.default_window_icon)
+      .field("package_info", &self.package_info);
+    {
+      w = w
+        .field("menu", &self.menu)
+        .field("menu_ids", &self.menu_ids);
+    }
+    w.finish()
+  }
+}
+
+/// Uses a custom URI scheme handler to resolve file requests
+pub struct CustomProtocol<R: Runtime> {
+  /// Handler for protocol
+  #[allow(clippy::type_complexity)]
+  pub protocol: Box<
+    dyn Fn(&AppHandle<R>, &HttpRequest) -> Result<HttpResponse, Box<dyn std::error::Error>>
+      + Send
+      + Sync,
+  >,
+}
+
 #[default_runtime(crate::Wry, wry)]
+#[derive(Debug)]
 pub struct WindowManager<R: Runtime> {
   pub inner: Arc<InnerWindowManager<R>>,
   invoke_keys: Arc<Mutex<Vec<u32>>>,
@@ -107,7 +133,6 @@ impl<R: Runtime> Clone for WindowManager<R> {
   }
 }
 
-#[cfg(feature = "menu")]
 fn get_menu_ids(map: &mut HashMap<MenuHash, MenuId>, menu: &Menu) {
   for item in &menu.items {
     match item {
@@ -127,13 +152,10 @@ impl<R: Runtime> WindowManager<R> {
     plugins: PluginStore<R>,
     invoke_handler: Box<InvokeHandler<R>>,
     on_page_load: Box<OnPageLoad<R>>,
-    uri_scheme_protocols: HashMap<String, Arc<CustomProtocol>>,
+    uri_scheme_protocols: HashMap<String, Arc<CustomProtocol<R>>>,
     state: StateManager,
     window_event_listeners: Vec<GlobalWindowEventListener<R>>,
-    #[cfg(feature = "menu")] (menu, menu_event_listeners): (
-      Option<Menu>,
-      Vec<GlobalMenuEventListener<R>>,
-    ),
+    (menu, menu_event_listeners): (Option<Menu>, Vec<GlobalMenuEventListener<R>>),
   ) -> Self {
     Self {
       inner: Arc::new(InnerWindowManager {
@@ -146,10 +168,8 @@ impl<R: Runtime> WindowManager<R> {
         config: Arc::new(context.config),
         assets: context.assets,
         default_window_icon: context.default_window_icon,
-        salts: Mutex::default(),
         package_info: context.package_info,
         uri_scheme_protocols,
-        #[cfg(feature = "menu")]
         menu_ids: {
           let mut map = HashMap::new();
           if let Some(menu) = &menu {
@@ -157,9 +177,7 @@ impl<R: Runtime> WindowManager<R> {
           }
           map
         },
-        #[cfg(feature = "menu")]
         menu,
-        #[cfg(feature = "menu")]
         menu_event_listeners: Arc::new(menu_event_listeners),
         window_event_listeners: Arc::new(window_event_listeners),
       }),
@@ -178,7 +196,6 @@ impl<R: Runtime> WindowManager<R> {
   }
 
   /// Get the menu ids mapper.
-  #[cfg(feature = "menu")]
   pub(crate) fn menu_ids(&self) -> HashMap<MenuHash, MenuId> {
     self.inner.menu_ids.clone()
   }
@@ -225,6 +242,7 @@ impl<R: Runtime> WindowManager<R> {
     mut pending: PendingWindow<R>,
     label: &str,
     pending_labels: &[String],
+    app_handle: AppHandle<R>,
   ) -> crate::Result<PendingWindow<R>> {
     let is_init_global = self.inner.config.build.with_global_tauri;
     let plugin_init = self
@@ -254,6 +272,8 @@ impl<R: Runtime> WindowManager<R> {
       ));
     }
 
+    pending.webview_attributes = webview_attributes;
+
     if !pending.window_builder.has_icon() {
       if let Some(default_window_icon) = &self.inner.default_window_icon {
         let icon = Icon::Raw(default_window_icon.clone());
@@ -261,34 +281,98 @@ impl<R: Runtime> WindowManager<R> {
       }
     }
 
-    #[cfg(feature = "menu")]
     if !pending.window_builder.has_menu() {
       if let Some(menu) = &self.inner.menu {
         pending.window_builder = pending.window_builder.menu(menu.clone());
       }
     }
 
-    for (uri_scheme, protocol) in &self.inner.uri_scheme_protocols {
-      if !webview_attributes.has_uri_scheme_protocol(uri_scheme) {
-        let protocol = protocol.clone();
-        webview_attributes = webview_attributes
-          .register_uri_scheme_protocol(uri_scheme.clone(), move |p| (protocol.protocol)(p));
-      }
-    }
+    let mut registered_scheme_protocols = Vec::new();
 
-    if !webview_attributes.has_uri_scheme_protocol("tauri") {
-      webview_attributes = webview_attributes
-        .register_uri_scheme_protocol("tauri", self.prepare_uri_scheme_protocol().protocol);
-    }
-    if !webview_attributes.has_uri_scheme_protocol("asset") {
-      webview_attributes = webview_attributes.register_uri_scheme_protocol("asset", move |url| {
-        let path = url.replace("asset://", "");
-        let data = crate::async_runtime::block_on(async move { tokio::fs::read(path).await })?;
-        Ok(data)
+    for (uri_scheme, protocol) in &self.inner.uri_scheme_protocols {
+      registered_scheme_protocols.push(uri_scheme.clone());
+      let protocol = protocol.clone();
+      let app_handle = Mutex::new(app_handle.clone());
+      pending.register_uri_scheme_protocol(uri_scheme.clone(), move |p| {
+        (protocol.protocol)(&app_handle.lock().unwrap(), p)
       });
     }
 
-    pending.webview_attributes = webview_attributes;
+    if !registered_scheme_protocols.contains(&"tauri".into()) {
+      pending.register_uri_scheme_protocol("tauri", self.prepare_uri_scheme_protocol());
+      registered_scheme_protocols.push("tauri".into());
+    }
+    if !registered_scheme_protocols.contains(&"asset".into()) {
+      pending.register_uri_scheme_protocol("asset", move |request| {
+        #[cfg(target_os = "windows")]
+        let path = request.uri().replace("asset://localhost/", "");
+        #[cfg(not(target_os = "windows"))]
+        let path = request.uri().replace("asset://", "");
+        let path = percent_encoding::percent_decode(path.as_bytes())
+          .decode_utf8_lossy()
+          .to_string();
+        let path_for_data = path.clone();
+
+        // handle 206 (partial range) http request
+        if let Some(range) = request.headers().get("range") {
+          let mut status_code = 200;
+          let path_for_data = path_for_data.clone();
+          let mut response = HttpResponseBuilder::new();
+          let (response, status_code, data) = crate::async_runtime::block_on(async move {
+            let mut buf = Vec::new();
+            let mut file = tokio::fs::File::open(path_for_data.clone()).await.unwrap();
+            // Get the file size
+            let file_size = file.metadata().await.unwrap().len();
+            // parse the range
+            let range = HttpRange::parse(range.to_str().unwrap(), file_size).unwrap();
+
+            // FIXME: Support multiple ranges
+            // let support only 1 range for now
+            let first_range = range.first();
+            if let Some(range) = first_range {
+              let mut real_length = range.length;
+              // prevent max_length;
+              // specially on webview2
+              if range.length > file_size / 3 {
+                // max size sent (400ko / request)
+                // as it's local file system we can afford to read more often
+                real_length = 1024 * 400;
+              }
+
+              // last byte we are reading, the length of the range include the last byte
+              // who should be skipped on the header
+              let last_byte = range.start + real_length - 1;
+              // partial content
+              status_code = 206;
+
+              response = response
+                .header("Connection", "Keep-Alive")
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Length", real_length)
+                .header(
+                  "Content-Range",
+                  format!("bytes {}-{}/{}", range.start, last_byte, file_size),
+                );
+
+              file.seek(SeekFrom::Start(range.start)).await.unwrap();
+              file.take(real_length).read_to_end(&mut buf).await.unwrap();
+            }
+
+            (response, status_code, buf)
+          });
+
+          if !data.is_empty() {
+            let mime_type = MimeType::parse(&data, &path);
+            return response.mimetype(&mime_type).status(status_code).body(data);
+          }
+        }
+
+        let data =
+          crate::async_runtime::block_on(async move { tokio::fs::read(path_for_data).await })?;
+        let mime_type = MimeType::parse(&data, &path);
+        HttpResponseBuilder::new().mimetype(&mime_type).body(data)
+      });
+    }
 
     Ok(pending)
   }
@@ -322,70 +406,78 @@ impl<R: Runtime> WindowManager<R> {
     })
   }
 
-  fn prepare_uri_scheme_protocol(&self) -> CustomProtocol {
+  #[allow(clippy::type_complexity)]
+  fn prepare_uri_scheme_protocol(
+    &self,
+  ) -> Box<dyn Fn(&HttpRequest) -> Result<HttpResponse, Box<dyn std::error::Error>> + Send + Sync>
+  {
     let assets = self.inner.assets.clone();
     let manager = self.clone();
-    CustomProtocol {
-      protocol: Box::new(move |path| {
-        let mut path = path
-          .split(&['?', '#'][..])
-          // ignore query string
-          .next()
-          .unwrap()
-          .to_string()
-          .replace("tauri://localhost", "");
-        if path.ends_with('/') {
-          path.pop();
-        }
-        path = percent_encoding::percent_decode(path.as_bytes())
-          .decode_utf8_lossy()
-          .to_string();
-        let path = if path.is_empty() {
-          // if the url is `tauri://localhost`, we should load `index.html`
-          "index.html".to_string()
-        } else {
-          // skip leading `/`
-          path.chars().skip(1).collect::<String>()
-        };
-        let is_javascript =
-          path.ends_with(".js") || path.ends_with(".cjs") || path.ends_with(".mjs");
-        let is_html = path.ends_with(".html");
+    Box::new(move |request| {
+      let mut path = request
+        .uri()
+        .split(&['?', '#'][..])
+        // ignore query string
+        .next()
+        .unwrap()
+        .to_string()
+        .replace("tauri://localhost", "");
+      if path.ends_with('/') {
+        path.pop();
+      }
+      path = percent_encoding::percent_decode(path.as_bytes())
+        .decode_utf8_lossy()
+        .to_string();
+      let path = if path.is_empty() {
+        // if the url is `tauri://localhost`, we should load `index.html`
+        "index.html".to_string()
+      } else {
+        // skip leading `/`
+        path.chars().skip(1).collect::<String>()
+      };
+      let is_javascript = path.ends_with(".js") || path.ends_with(".cjs") || path.ends_with(".mjs");
+      let is_html = path.ends_with(".html");
 
-        let asset_response = assets
-          .get(&path.as_str().into())
-          .or_else(|| {
-            #[cfg(debug_assertions)]
-            eprintln!("Asset `{}` not found; fallback to index.html", path); // TODO log::error!
-            assets.get(&"index.html".into())
-          })
-          .ok_or(crate::Error::AssetNotFound(path))
-          .map(Cow::into_owned);
-        match asset_response {
-          Ok(asset) => {
-            if is_javascript || is_html {
-              let contents = String::from_utf8_lossy(&asset).into_owned();
-              Ok(
-                contents
-                  .replacen(
-                    "__TAURI__INVOKE_KEY_TOKEN__",
-                    &manager.generate_invoke_key().to_string(),
-                    1,
-                  )
-                  .as_bytes()
-                  .to_vec(),
+      let asset_response = assets
+        .get(&path.as_str().into())
+        .or_else(|| assets.get(&format!("{}/index.html", path.as_str()).into()))
+        .or_else(|| {
+          #[cfg(debug_assertions)]
+          eprintln!("Asset `{}` not found; fallback to index.html", path); // TODO log::error!
+          assets.get(&"index.html".into())
+        })
+        .ok_or_else(|| crate::Error::AssetNotFound(path.clone()))
+        .map(Cow::into_owned);
+
+      match asset_response {
+        Ok(asset) => {
+          let final_data = match is_javascript || is_html {
+            true => String::from_utf8_lossy(&asset)
+              .into_owned()
+              .replacen(
+                "__TAURI__INVOKE_KEY_TOKEN__",
+                &manager.generate_invoke_key().to_string(),
+                1,
               )
-            } else {
-              Ok(asset)
-            }
-          }
-          Err(e) => {
-            #[cfg(debug_assertions)]
-            eprintln!("{:?}", e); // TODO log::error!
-            Err(Box::new(e))
-          }
+              .as_bytes()
+              .to_vec(),
+            false => asset,
+          };
+
+          let mime_type = MimeType::parse(&final_data, &path);
+          Ok(
+            HttpResponseBuilder::new()
+              .mimetype(&mime_type)
+              .body(final_data)?,
+          )
         }
-      }),
-    }
+        Err(e) => {
+          #[cfg(debug_assertions)]
+          eprintln!("{:?}", e); // TODO log::error!
+          Err(Box::new(e))
+        }
+      }
+    })
   }
 
   fn prepare_file_drop(&self, app_handle: AppHandle<R>) -> FileDropHandler<R> {
@@ -396,8 +488,8 @@ impl<R: Runtime> WindowManager<R> {
       crate::async_runtime::block_on(async move {
         let window = Window::new(manager.clone(), window, app_handle);
         let _ = match event {
-          FileDropEvent::Hovered(paths) => window.emit("tauri://file-drop", Some(paths)),
-          FileDropEvent::Dropped(paths) => window.emit("tauri://file-drop-hover", Some(paths)),
+          FileDropEvent::Hovered(paths) => window.emit("tauri://file-drop-hover", Some(paths)),
+          FileDropEvent::Dropped(paths) => window.emit("tauri://file-drop", Some(paths)),
           FileDropEvent::Cancelled => window.emit("tauri://file-drop-cancelled", Some(())),
           _ => unimplemented!(),
         };
@@ -421,10 +513,10 @@ impl<R: Runtime> WindowManager<R> {
       {core_script}
       {event_initialization_script}
       if (window.rpc) {{
-        window.__TAURI__._invoke("__initialized", {{ url: window.location.href }}, {key})
+        window.__TAURI_INVOKE__("__initialized", {{ url: window.location.href }}, {key})
       }} else {{
         window.addEventListener('DOMContentLoaded', function () {{
-          window.__TAURI__._invoke("__initialized", {{ url: window.location.href }}, {key})
+          window.__TAURI_INVOKE__("__initialized", {{ url: window.location.href }}, {key})
         }})
       }}
       {plugin_initialization_script}
@@ -436,46 +528,25 @@ impl<R: Runtime> WindowManager<R> {
       } else {
         ""
       },
-      event_initialization_script = self.event_initialization_script(key),
+      event_initialization_script = self.event_initialization_script(),
       plugin_initialization_script = plugin_initialization_script
     )
   }
 
-  fn event_initialization_script(&self, key: u32) -> String {
+  fn event_initialization_script(&self) -> String {
     return format!(
       "
-      window['{queue}'] = [];
-      window['{function}'] = function (eventData, salt, ignoreQueue) {{
+      window['{function}'] = function (eventData) {{
       const listeners = (window['{listeners}'] && window['{listeners}'][eventData.event]) || []
-      if (!ignoreQueue && listeners.length === 0) {{
-        window['{queue}'].push({{
-          eventData: eventData,
-          salt: salt
-        }})
-      }}
 
-      if (listeners.length > 0) {{
-        window.__TAURI__._invoke('tauri', {{
-          __tauriModule: 'Internal',
-          message: {{
-            cmd: 'validateSalt',
-            salt: salt
-          }}
-        }}, {key}).then(function (flag) {{
-          if (flag) {{
-            for (let i = listeners.length - 1; i >= 0; i--) {{
-              const listener = listeners[i]
-              eventData.id = listener.id
-              listener.handler(eventData)
-            }}
-          }}
-        }})
+      for (let i = listeners.length - 1; i >= 0; i--) {{
+        const listener = listeners[i]
+        eventData.id = listener.id
+        listener.handler(eventData)
       }}
     }}
     ",
-      key = key,
       function = self.inner.listeners.function_name(),
-      queue = self.inner.listeners.queue_object_name(),
       listeners = self.inner.listeners.listeners_object_name()
     );
   }
@@ -497,7 +568,6 @@ mod test {
       Default::default(),
       StateManager::new(),
       Default::default(),
-      #[cfg(feature = "menu")]
       Default::default(),
     );
 
@@ -533,7 +603,7 @@ impl<R: Runtime> WindowManager<R> {
       .extend_api(invoke);
   }
 
-  pub fn initialize_plugins(&self, app: &App<R>) -> crate::Result<()> {
+  pub fn initialize_plugins(&self, app: &AppHandle<R>) -> crate::Result<()> {
     self
       .inner
       .plugins
@@ -573,7 +643,7 @@ impl<R: Runtime> WindowManager<R> {
 
     if is_local {
       let label = pending.label.clone();
-      pending = self.prepare_pending_window(pending, &label, pending_labels)?;
+      pending = self.prepare_pending_window(pending, &label, pending_labels, app_handle.clone())?;
       pending.rpc_handler = Some(self.prepare_rpc_handler(app_handle.clone()));
     }
 
@@ -623,7 +693,6 @@ impl<R: Runtime> WindowManager<R> {
         });
       }
     });
-    #[cfg(feature = "menu")]
     {
       let window_ = window.clone();
       let menu_event_listeners = self.inner.menu_event_listeners.clone();
@@ -710,39 +779,13 @@ impl<R: Runtime> WindowManager<R> {
   ) -> EventHandler {
     self.inner.listeners.once(event, window, handler)
   }
+
   pub fn event_listeners_object_name(&self) -> String {
     self.inner.listeners.listeners_object_name()
   }
-  pub fn event_queue_object_name(&self) -> String {
-    self.inner.listeners.queue_object_name()
-  }
+
   pub fn event_emit_function_name(&self) -> String {
     self.inner.listeners.function_name()
-  }
-  pub fn generate_salt(&self) -> Uuid {
-    let salt = Uuid::new_v4();
-    self
-      .inner
-      .salts
-      .lock()
-      .expect("poisoned salt mutex")
-      .insert(salt);
-    salt
-  }
-  pub fn verify_salt(&self, salt: String) -> bool {
-    // flat out ignore any invalid uuids
-    let uuid: Uuid = match salt.parse() {
-      Ok(uuid) => uuid,
-      Err(_) => return false,
-    };
-
-    // HashSet::remove lets us know if the entry was found
-    self
-      .inner
-      .salts
-      .lock()
-      .expect("poisoned salt mutex")
-      .remove(&uuid)
   }
 
   pub fn get_window(&self, label: &str) -> Option<Window<R>> {
@@ -806,7 +849,6 @@ struct ScaleFactorChanged {
   size: PhysicalSize<u32>,
 }
 
-#[cfg(feature = "menu")]
 fn on_menu_event<R: Runtime>(window: &Window<R>, event: &MenuEvent) -> crate::Result<()> {
   window.emit(MENU_EVENT, Some(event.menu_item_id.clone()))
 }

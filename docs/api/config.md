@@ -45,7 +45,7 @@ In addition to the JSON defined on the `tauri.conf.json` file, Tauri reads a pla
 ## `package`
 
 <Properties anchorRoot="package" rows={[
-  { property: "name", optional: true, type: "string", description: `Application binary name. Converted to snake-case on Linux.` },
+  { property: "productName", optional: true, type: "string", description: `Application name. The binary name is converted to snake-case on Linux.` },
   { property: "version", optional: true, type: "string", description: `Application version.` }
 ]}/>
 
@@ -175,7 +175,9 @@ In addition to the JSON defined on the `tauri.conf.json` file, Tauri reads a pla
           { property: "featureRefs", optional: true, type: "string[]", description: `The Feature element ids you want to reference from the fragments.` },
           { property: "mergeRefs", optional: true, type: "string[]", description: `The Merge element ids you want to reference from the fragments.` },
           { property: "skipWebviewInstall", optional: true, type: "boolean", description: `Disables the Webview2 runtime installation after app install.` },
-          { property: "license", optional: true, type: "string", description: `The path to the license file to render on the installer. Must be an RTF file, so if a different extension is provided, we convert it to the RTF format.` }]} />
+          { property: "license", optional: true, type: "string", description: `The path to the license file to render on the installer. Must be an RTF file, so if a different extension is provided, we convert it to the RTF format.` },
+          { property: "bannerPath", optional: true, type: "string", description: `Path to a bitmap file to use as the installation user interface banner. This bitmap will appear at the top of all but the first page of the installer. The required dimensions are 493px × 58px.` },
+          { property: "dialogImagePath", optional: true, type: "string", description: `Path to a bitmap file to use on the installation user interface dialogs. It is used on the welcome and completion dialogs. The required dimensions are 493px × 312px.` }]} />
         }
         ]} />
       },
@@ -211,7 +213,6 @@ In addition to the JSON defined on the `tauri.conf.json` file, Tauri reads a pla
           { property: "removeDir", optional: true, type: "boolean", description: `Remove directory from local filesystem.` },
           { property: "removeFile", optional: true, type: "boolean", description: `Remove file from local filesystem.` },
           { property: "renameFile", optional: true, type: "boolean", description: `Rename file from local filesystem.` },
-          { property: "path", optional: true, type: "boolean", description: `Resolve system paths.` },
         ]}/>
       },
       {
@@ -248,6 +249,16 @@ In addition to the JSON defined on the `tauri.conf.json` file, Tauri reads a pla
       {
         property: "globalShortcut", optional: true, type: "object", child: <Properties anchorRoot="tauri.allowlist.globalShortcut" rows={[
           { property: "all", type: "boolean", description: `Use this flag to enable all global shortcut API features.` },
+        ]}/>
+      },
+      {
+        property: "os", optional: true, type: "object", child: <Properties anchorRoot="tauri.allowlist.os" rows={[
+          { property: "all", type: "boolean", description: `Use this flag to enable all OS API features.` },
+        ]}/>
+      },
+      {
+        property: "path", optional: true, type: "object", child: <Properties anchorRoot="tauri.allowlist.path" rows={[
+          { property: "all", type: "boolean", description: `Use this flag to enable all path API features.` },
         ]}/>
       },
     ]} />

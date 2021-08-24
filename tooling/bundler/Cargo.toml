@@ -2,7 +2,7 @@ workspace = { }
 
 [package]
 name = "tauri-bundler"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 authors = [
   "George Burton <burtonageo@gmail.com>",
   "Tauri Programme within The Commons Conservancy"
@@ -52,6 +52,9 @@ hex = "0.4"
 [target."cfg(target_os = \"macos\")".dependencies]
 chrono = "0.4"
 dirs-next = "2.0"
+
+[target."cfg(target_os = \"linux\")".dependencies]
+heck = "0.3"
 
 [lib]
 name = "tauri_bundler"

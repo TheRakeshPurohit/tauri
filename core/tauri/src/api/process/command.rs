@@ -19,7 +19,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-use crate::async_runtime::{channel, spawn as spawn_task, Receiver};
+use crate::async_runtime::{block_on as block_on_task, channel, Receiver};
 use os_pipe::{pipe, PipeWriter};
 use serde::Serialize;
 use shared_child::SharedChild;
@@ -33,7 +33,7 @@ fn commands() -> &'static ChildStore {
   &STORE
 }
 
-/// Kill all child process created with [`Command`].
+/// Kills all child processes created with [`Command`].
 /// By default it's called before the [`crate::App`] exits.
 pub fn kill_children() {
   for child in commands().lock().unwrap().values() {
@@ -41,7 +41,7 @@ pub fn kill_children() {
   }
 }
 
-/// Payload for the `Terminated` command event.
+/// Payload for the [`CommandEvent::Terminated`] command event.
 #[derive(Debug, Clone, Serialize)]
 pub struct TerminatedPayload {
   /// Exit code of the process.
@@ -85,7 +85,8 @@ macro_rules! get_std_command {
   }};
 }
 
-/// API to spawn commands.
+/// The type to spawn commands.
+#[derive(Debug)]
 pub struct Command {
   program: String,
   args: Vec<String>,
@@ -94,20 +95,21 @@ pub struct Command {
   current_dir: Option<PathBuf>,
 }
 
-/// Child spawned.
+/// Spawned child process.
+#[derive(Debug)]
 pub struct CommandChild {
   inner: Arc<SharedChild>,
   stdin_writer: PipeWriter,
 }
 
 impl CommandChild {
-  /// Write to process stdin.
+  /// Writes to process stdin.
   pub fn write(&mut self, buf: &[u8]) -> crate::api::Result<()> {
     self.stdin_writer.write_all(buf)?;
     Ok(())
   }
 
-  /// Send a kill signal to the child.
+  /// Sends a kill signal to the child.
   pub fn kill(self) -> crate::api::Result<()> {
     self.inner.kill()?;
     Ok(())
@@ -120,6 +122,7 @@ impl CommandChild {
 }
 
 /// Describes the result of a process after it has terminated.
+#[derive(Debug)]
 pub struct ExitStatus {
   code: Option<i32>,
 }
@@ -130,13 +133,14 @@ impl ExitStatus {
     self.code
   }
 
-  /// Was termination successful? Signal termination is not considered a success, and success is defined as a zero exit status.
+  /// Returns true if exit status is zero. Signal termination is not considered a success, and success is defined as a zero exit status.
   pub fn success(&self) -> bool {
     self.code == Some(0)
   }
 }
 
 /// The output of a finished process.
+#[derive(Debug)]
 pub struct Output {
   /// The status (exit code) of the process.
   pub status: ExitStatus,
@@ -183,6 +187,9 @@ impl Command {
   }
 
   /// Creates a new Command for launching the given sidecar program.
+  ///
+  /// A sidecar program is a embedded external binary in order to make your application work
+  /// or to prevent users having to install additional dependencies (e.g. Node.js, Python, etc).
   pub fn new_sidecar<S: Into<String>>(program: S) -> crate::Result<Self> {
     let program = format!(
       "{}-{}",
@@ -192,7 +199,7 @@ impl Command {
     Ok(Self::new(relative_command_path(program)?))
   }
 
-  /// Append args to the command.
+  /// Appends arguments to the command.
   pub fn args<I, S>(mut self, args: I) -> Self
   where
     I: IntoIterator<Item = S>,
@@ -248,7 +255,7 @@ impl Command {
       let reader = BufReader::new(stdout_reader);
       for line in reader.lines() {
         let tx_ = tx_.clone();
-        spawn_task(async move {
+        block_on_task(async move {
           let _ = match line {
             Ok(line) => tx_.send(CommandEvent::Stdout(line)).await,
             Err(e) => tx_.send(CommandEvent::Error(e.to_string())).await,
@@ -264,7 +271,7 @@ impl Command {
       let reader = BufReader::new(stderr_reader);
       for line in reader.lines() {
         let tx_ = tx_.clone();
-        spawn_task(async move {
+        block_on_task(async move {
           let _ = match line {
             Ok(line) => tx_.send(CommandEvent::Stderr(line)).await,
             Err(e) => tx_.send(CommandEvent::Error(e.to_string())).await,
@@ -278,7 +285,7 @@ impl Command {
         Ok(status) => {
           let _l = guard.write().unwrap();
           commands().lock().unwrap().remove(&child_.id());
-          spawn_task(async move {
+          let _ = block_on_task(async move {
             tx.send(CommandEvent::Terminated(TerminatedPayload {
               code: status.code(),
               #[cfg(windows)]
@@ -291,7 +298,7 @@ impl Command {
         }
         Err(e) => {
           let _l = guard.write().unwrap();
-          spawn_task(async move { tx.send(CommandEvent::Error(e.to_string())).await });
+          let _ = block_on_task(async move { tx.send(CommandEvent::Error(e.to_string())).await });
         }
       };
     });
@@ -311,6 +318,7 @@ impl Command {
     let (mut rx, _child) = self.spawn()?;
     let code = crate::async_runtime::block_on(async move {
       let mut code = None;
+      #[allow(clippy::collapsible_match)]
       while let Some(event) = rx.recv().await {
         if let CommandEvent::Terminated(payload) = event {
           code = payload.code;

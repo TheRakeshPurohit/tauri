@@ -196,13 +196,13 @@ impl EmbeddedAssets {
           "import \\*",
           "import (\"|');?$",
           "import\\(",
-          "import (.|\n)+ from (\"|')([A-Za-z\\-]+)(\"|')",
+          "import (.|\n)+ from (\"|')([A-Za-z/\\.@-]+)(\"|')",
           // export keywords
           "export\\{",
           "export \\{",
           "export\\*",
           "export \\*",
-          "export (default|class|let|const|function)",
+          "export (default|class|let|const|function|async)",
         ])
         .unwrap()
         .is_match(&js)
@@ -246,7 +246,7 @@ impl EmbeddedAssets {
       if input.len() < MULTI_HASH_SIZE_LIMIT {
         hasher.update(&input);
       } else {
-        hasher.update_with_join::<blake3::join::RayonJoin>(&input);
+        hasher.update_rayon(&input);
       }
       hasher.finalize().to_hex()
     };
@@ -304,7 +304,7 @@ impl ToTokens for EmbeddedAssets {
 
     // we expect phf related items to be in path when generating the path code
     tokens.append_all(quote! {{
-        use ::tauri::api::assets::{EmbeddedAssets, phf, phf::phf_map};
+        use ::tauri::utils::assets::{EmbeddedAssets, phf, phf::phf_map};
         EmbeddedAssets::from_zstd(phf_map! { #map })
     }});
   }

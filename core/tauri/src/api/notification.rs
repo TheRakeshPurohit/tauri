@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+//! Types and functions related to desktop notifications.
+
 #[cfg(windows)]
 use std::path::MAIN_SEPARATOR;
 
-/// The Notification definition.
+/// The desktop notification definition.
+///
 /// Allows you to construct a Notification data and send it.
 ///
 /// # Example
@@ -18,7 +21,7 @@ use std::path::MAIN_SEPARATOR;
 ///   .show();
 /// ```
 #[allow(dead_code)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Notification {
   /// The notification body.
   body: Option<String>,

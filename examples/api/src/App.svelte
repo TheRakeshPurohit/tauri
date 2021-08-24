@@ -4,7 +4,6 @@
   import hotkeys from "hotkeys-js";
   import { open } from "@tauri-apps/api/shell";
   import { invoke } from "@tauri-apps/api/tauri";
-  import { appWindow, getCurrent } from "@tauri-apps/api/window";
 
   import Welcome from "./components/Welcome.svelte";
   import Cli from "./components/Cli.svelte";
@@ -18,6 +17,8 @@
   import Shell from "./components/Shell.svelte";
   import Updater from "./components/Updater.svelte";
   import Clipboard from "./components/Clipboard.svelte";
+  import WebRTC from './components/WebRTC.svelte'
+  import HttpForm from "./components/HttpForm.svelte";
 
   const MENU_TOGGLE_HOTKEY = 'ctrl+b';
 
@@ -25,12 +26,6 @@
     hotkeys(MENU_TOGGLE_HOTKEY, () => {
       invoke('menu_toggle');
     });
-
-    getCurrent().listen('close-requested', async () => {
-      if (await confirm('Are you sure?')) {
-        await appWindow.close()
-      }
-    })
   });
 
   const views = [
@@ -59,6 +54,10 @@
       component: Http,
     },
     {
+      label: "HTTP Form",
+      component: HttpForm,
+    },
+    {
       label: "Notifications",
       component: Notifications,
     },
@@ -81,7 +80,11 @@
     {
       label: "Clipboard",
       component: Clipboard,
-    }
+    },
+    {
+      label: "WebRTC",
+      component: WebRTC,
+    },
   ];
 
   let selected = views[0];

@@ -6,10 +6,6 @@
   all(not(debug_assertions), target_os = "windows"),
   windows_subsystem = "windows"
 )]
-#![allow(
-    // Clippy bug: https://github.com/rust-lang/rust-clippy/issues/7422
-    clippy::nonstandard_macro_braces,
-)]
 
 // Application code for a splashscreen system that waits on a Rust initialization script
 #[cfg(not(feature = "ui"))]
@@ -39,7 +35,9 @@ mod rust {
         Ok(())
       })
       .invoke_handler(tauri::generate_handler![close_splashscreen])
-      .run(tauri::generate_context!())
+      .run(tauri::generate_context!(
+        "../../examples/splashscreen/src-tauri/tauri.conf.json"
+      ))
       .expect("failed to run app");
   }
 }
@@ -80,7 +78,9 @@ mod ui {
         Ok(())
       })
       .invoke_handler(tauri::generate_handler![close_splashscreen])
-      .run(tauri::generate_context!())
+      .run(tauri::generate_context!(
+        "../../examples/splashscreen/src-tauri/tauri.conf.json"
+      ))
       .expect("error while running tauri application");
   }
 }

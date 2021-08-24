@@ -3,10 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 use crate::{
-  api::{config::Config, PackageInfo},
   hooks::{InvokeError, InvokeMessage, InvokeResolver},
   runtime::Runtime,
-  Invoke, Window,
+  Config, Invoke, PackageInfo, Window,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -22,9 +21,9 @@ mod event;
 mod file_system;
 mod global_shortcut;
 mod http;
-mod internal;
 mod notification;
 mod operating_system;
+mod path;
 mod process;
 mod shell;
 mod window;
@@ -49,10 +48,10 @@ enum Module {
   Process(process::Cmd),
   Fs(file_system::Cmd),
   Os(operating_system::Cmd),
+  Path(path::Cmd),
   Window(Box<window::Cmd>),
   Shell(shell::Cmd),
   Event(event::Cmd),
-  Internal(internal::Cmd),
   Dialog(dialog::Cmd),
   Cli(cli::Cmd),
   Notification(notification::Cmd),
@@ -84,6 +83,12 @@ impl Module {
           .and_then(|r| r.json)
           .map_err(InvokeError::from)
       }),
+      Self::Path(cmd) => resolver.respond_async(async move {
+        cmd
+          .run(config, &package_info)
+          .and_then(|r| r.json)
+          .map_err(InvokeError::from)
+      }),
       Self::Os(cmd) => resolver
         .respond_async(async move { cmd.run().and_then(|r| r.json).map_err(InvokeError::from) }),
       Self::Window(cmd) => resolver.respond_async(async move {
@@ -105,31 +110,12 @@ impl Module {
           .and_then(|r| r.json)
           .map_err(InvokeError::from)
       }),
-      Self::Internal(cmd) => resolver.respond_async(async move {
-        cmd
-          .run(window)
-          .and_then(|r| r.json)
-          .map_err(InvokeError::from)
-      }),
-      // on macOS, the dialog must run on another thread: https://github.com/rust-windowing/winit/issues/1779
-      // we do the same on Windows just to stay consistent with `tao` (and it also improves UX because of the event loop)
-      #[cfg(not(target_os = "linux"))]
       Self::Dialog(cmd) => resolver.respond_async(async move {
         cmd
           .run(window)
           .and_then(|r| r.json)
           .map_err(InvokeError::from)
       }),
-      // on Linux, the dialog must run on the rpc task.
-      #[cfg(target_os = "linux")]
-      Self::Dialog(cmd) => {
-        resolver.respond_closure(move || {
-          cmd
-            .run(window)
-            .and_then(|r| r.json)
-            .map_err(InvokeError::from)
-        });
-      }
       Self::Cli(cmd) => {
         if let Some(cli_config) = config.tauri.cli.clone() {
           resolver.respond_async(async move {
@@ -140,9 +126,9 @@ impl Module {
           })
         }
       }
-      Self::Notification(cmd) => resolver.respond_closure(move || {
+      Self::Notification(cmd) => resolver.respond_async(async move {
         cmd
-          .run(config, &package_info)
+          .run(window, config, &package_info)
           .and_then(|r| r.json)
           .map_err(InvokeError::from)
       }),

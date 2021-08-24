@@ -11,6 +11,8 @@ use std::{
 };
 
 use anyhow::Context;
+#[cfg(target_os = "linux")]
+use heck::KebabCase;
 use serde::Deserialize;
 
 use crate::helpers::{app_paths::tauri_dir, config::Config, manifest::Manifest};
@@ -212,8 +214,7 @@ impl AppSettings {
             BundleBinary::new(
               config
                 .package
-                .product_name
-                .clone()
+                .binary_name()
                 .unwrap_or_else(|| binary.name.clone()),
               true,
             )
@@ -244,16 +245,15 @@ impl AppSettings {
     if let Some(default_run) = self.package_settings.default_run.as_ref() {
       match binaries.iter_mut().find(|bin| bin.name() == default_run) {
         Some(bin) => {
-          if let Some(product_name) = config.package.product_name.clone() {
-            bin.set_name(product_name);
+          if let Some(bin_name) = config.package.binary_name() {
+            bin.set_name(bin_name);
           }
         }
         None => {
           binaries.push(BundleBinary::new(
             config
               .package
-              .product_name
-              .clone()
+              .binary_name()
               .unwrap_or_else(|| default_run.to_string()),
             true,
           ));
@@ -263,6 +263,9 @@ impl AppSettings {
 
     match binaries.len() {
       0 => binaries.push(BundleBinary::new(
+        #[cfg(target_os = "linux")]
+        self.package_settings.product_name.to_kebab_case(),
+        #[cfg(not(target_os = "linux"))]
         self.package_settings.product_name.clone(),
         true,
       )),
@@ -385,10 +388,17 @@ fn tauri_config_to_bundle_settings(
     // provides `libwebkit2gtk-4.0.so.37` and all `4.0` versions have the -37 package name
     depends.push("libwebkit2gtk-4.0-37".to_string());
     depends.push("libgtk-3-0".to_string());
-    if manifest.features.contains("menu") || system_tray_config.is_some() {
-      depends.push("libgtksourceview-3.0-1".to_string());
-    }
   }
+
+  let signing_identity = match std::env::var_os("APPLE_SIGNING_IDENTITY") {
+    Some(signing_identity) => Some(
+      signing_identity
+        .to_str()
+        .expect("failed to convert APPLE_SIGNING_IDENTITY to string")
+        .to_string(),
+    ),
+    None => config.macos.signing_identity,
+  };
 
   Ok(BundleSettings {
     identifier: config.identifier,
@@ -424,8 +434,16 @@ fn tauri_config_to_bundle_settings(
       license: config.macos.license,
       use_bootstrapper: Some(config.macos.use_bootstrapper),
       exception_domain: config.macos.exception_domain,
-      signing_identity: config.macos.signing_identity,
+      signing_identity,
       entitlements: config.macos.entitlements,
+      info_plist_path: {
+        let path = tauri_dir().join("Info.plist");
+        if path.exists() {
+          Some(path)
+        } else {
+          None
+        }
+      },
     },
     windows: WindowsSettings {
       timestamp_url: config.windows.timestamp_url,
@@ -433,9 +451,7 @@ fn tauri_config_to_bundle_settings(
       certificate_thumbprint: config.windows.certificate_thumbprint,
       wix: config.windows.wix.map(|w| {
         let mut wix = WixSettings::from(w);
-        wix.license = wix
-          .license
-          .map(|l| tauri_dir().join(l).to_string_lossy().into_owned());
+        wix.license = wix.license.map(|l| tauri_dir().join(l));
         wix
       }),
       icon_path: windows_icon_path,

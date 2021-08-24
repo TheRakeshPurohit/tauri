@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+//! Types and functions related to HTTP request.
+
 use http::{header::HeaderName, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,13 +11,13 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
-/// Client builder.
-#[derive(Clone, Default, Deserialize)]
+/// The builder of [`Client`].
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientBuilder {
-  /// Max number of redirections to follow
+  /// Max number of redirections to follow.
   pub max_redirections: Option<usize>,
-  /// Connect timeout in seconds for the request
+  /// Connect timeout in seconds for the request.
   pub connect_timeout: Option<u64>,
 }
 
@@ -61,22 +63,22 @@ impl ClientBuilder {
   }
 }
 
-/// The HTTP client.
+/// The HTTP client based on [`reqwest`].
 #[cfg(feature = "reqwest-client")]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Client(reqwest::Client);
 
 /// The HTTP client.
 #[cfg(not(feature = "reqwest-client"))]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Client(ClientBuilder);
 
 #[cfg(not(feature = "reqwest-client"))]
 impl Client {
   /// Executes an HTTP request
   ///
-  /// The response will be transformed to String,
-  /// If reading the response as binary, the byte array will be serialized using serde_json.
+  /// The response will be transformed to String.
+  /// If reading the response as binary, the byte array will be serialized using [`serde_json`].
   pub async fn send(&self, request: HttpRequestBuilder) -> crate::api::Result<Response> {
     let method = Method::from_bytes(request.method.to_uppercase().as_bytes())?;
 
@@ -88,8 +90,10 @@ impl Client {
 
     if let Some(headers) = request.headers {
       for (header, header_value) in headers.iter() {
-        request_builder =
-          request_builder.header(HeaderName::from_bytes(header.as_bytes())?, header_value);
+        request_builder = request_builder.header(
+          HeaderName::from_bytes(header.as_bytes())?,
+          header_value.as_bytes(),
+        );
       }
     }
 
@@ -130,7 +134,7 @@ impl Client {
 impl Client {
   /// Executes an HTTP request
   ///
-  /// The response will be transformed to String,
+  /// The response will be transformed to String.
   /// If reading the response as binary, the byte array will be serialized using serde_json.
   pub async fn send(&self, request: HttpRequestBuilder) -> crate::api::Result<Response> {
     let method = Method::from_bytes(request.method.to_uppercase().as_bytes())?;
@@ -169,7 +173,7 @@ impl Client {
       for (header, value) in headers.iter() {
         http_request.headers_mut().insert(
           HeaderName::from_bytes(header.as_bytes())?,
-          http::header::HeaderValue::from_str(value)?,
+          http::header::HeaderValue::from_bytes(value.as_bytes())?,
         );
       }
     }
@@ -186,7 +190,7 @@ impl Client {
 #[derive(Serialize_repr, Deserialize_repr, Clone, Debug)]
 #[repr(u16)]
 #[non_exhaustive]
-/// The request's response type
+/// The HTTP response type.
 pub enum ResponseType {
   /// Read the response as JSON
   Json = 1,
@@ -196,8 +200,8 @@ pub enum ResponseType {
   Binary,
 }
 
-/// FormBody data types.
-#[derive(Deserialize)]
+/// [`FormBody`] data types.
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
 pub enum FormPart {
@@ -210,7 +214,7 @@ pub enum FormPart {
 }
 
 /// Form body definition.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct FormBody(HashMap<String, FormPart>);
 
 impl FormBody {
@@ -221,7 +225,7 @@ impl FormBody {
 }
 
 /// A body for the request.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 #[non_exhaustive]
 pub enum Body {
@@ -255,7 +259,7 @@ pub enum Body {
 ///   }
 /// }
 /// ```
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequestBuilder {
   /// The request method (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT or TRACE)
@@ -288,7 +292,7 @@ impl HttpRequestBuilder {
     }
   }
 
-  /// Sets the request params.
+  /// Sets the request parameters.
   pub fn query(mut self, query: HashMap<String, String>) -> Self {
     self.query = Some(query);
     self
@@ -321,9 +325,11 @@ impl HttpRequestBuilder {
 
 /// The HTTP response.
 #[cfg(feature = "reqwest-client")]
+#[derive(Debug)]
 pub struct Response(ResponseType, reqwest::Response);
 /// The HTTP response.
 #[cfg(not(feature = "reqwest-client"))]
+#[derive(Debug)]
 pub struct Response(ResponseType, attohttpc::Response, String);
 
 impl Response {
@@ -346,7 +352,10 @@ impl Response {
 
     let mut headers = HashMap::new();
     for (name, value) in self.1.headers() {
-      headers.insert(name.as_str().to_string(), value.to_str()?.to_string());
+      headers.insert(
+        name.as_str().to_string(),
+        String::from_utf8(value.as_bytes().to_vec())?,
+      );
     }
     let status = self.1.status().as_u16();
 
@@ -375,6 +384,7 @@ impl Response {
 
 /// A response with raw bytes.
 #[non_exhaustive]
+#[derive(Debug)]
 pub struct RawResponse {
   /// Response status code.
   pub status: u16,
@@ -382,8 +392,8 @@ pub struct RawResponse {
   pub data: Vec<u8>,
 }
 
-/// The response type.
-#[derive(Serialize)]
+/// The response data.
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct ResponseData {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! # Tauri Updater
+//! The Tauri updater.
 //!
 //! The updater is focused on making Tauri's application updates **as safe and transparent as updates to a website**.
 //!
@@ -333,14 +333,13 @@ mod error;
 pub use self::error::Error;
 
 use crate::{
-  api::{
-    config::UpdaterConfig,
-    dialog::{ask, AskResponse},
-    process::restart,
-  },
+  api::{dialog::ask, process::restart},
   runtime::Runtime,
+  utils::config::UpdaterConfig,
   Window,
 };
+
+use std::sync::mpsc::channel;
 
 /// Check for new updates
 pub const EVENT_CHECK_UPDATE: &str = "tauri://update";
@@ -378,7 +377,7 @@ struct UpdateManifest {
 /// Check if there is any new update with builtin dialog.
 pub(crate) async fn check_update_with_dialog<R: Runtime>(
   updater_config: UpdaterConfig,
-  package_info: crate::api::PackageInfo,
+  package_info: crate::PackageInfo,
   window: Window<R>,
 ) {
   if let Some(endpoints) = updater_config.endpoints.clone() {
@@ -395,8 +394,15 @@ pub(crate) async fn check_update_with_dialog<R: Runtime>(
         // if dialog enabled only
         if updater.should_update && updater_config.dialog {
           let body = updater.body.clone().unwrap_or_else(|| String::from(""));
-          let dialog =
-            prompt_for_install(&updater.clone(), &package_info.name, &body.clone(), pubkey).await;
+          let window_ = window.clone();
+          let dialog = prompt_for_install(
+            window_,
+            &updater.clone(),
+            &package_info.name,
+            &body.clone(),
+            pubkey,
+          )
+          .await;
 
           if dialog.is_err() {
             send_status_update(
@@ -404,8 +410,6 @@ pub(crate) async fn check_update_with_dialog<R: Runtime>(
               EVENT_STATUS_ERROR,
               Some(dialog.err().unwrap().to_string()),
             );
-
-            return;
           }
         }
       }
@@ -420,7 +424,7 @@ pub(crate) async fn check_update_with_dialog<R: Runtime>(
 /// This function should be run on the main thread once.
 pub(crate) fn listener<R: Runtime>(
   updater_config: UpdaterConfig,
-  package_info: crate::api::PackageInfo,
+  package_info: crate::PackageInfo,
   window: &Window<R>,
 ) {
   let isolated_window = window.clone();
@@ -490,7 +494,7 @@ pub(crate) fn listener<R: Runtime>(
                   // emit {"status": "DONE"}
                   send_status_update(window.clone(), EVENT_STATUS_SUCCESS, None);
                 }
-              })
+              });
             });
           } else {
             send_status_update(window.clone(), EVENT_STATUS_UPTODATE, None);
@@ -500,7 +504,7 @@ pub(crate) fn listener<R: Runtime>(
           send_status_update(window.clone(), EVENT_STATUS_ERROR, Some(e.to_string()));
         }
       }
-    })
+    });
   });
 }
 
@@ -517,7 +521,8 @@ fn send_status_update<R: Runtime>(window: Window<R>, status: &str, error: Option
 
 // Prompt a dialog asking if the user want to install the new version
 // Maybe we should add an option to customize it in future versions.
-async fn prompt_for_install(
+async fn prompt_for_install<R: Runtime>(
+  window: Window<R>,
   updater: &self::core::Update,
   app_name: &str,
   body: &str,
@@ -526,9 +531,12 @@ async fn prompt_for_install(
   // remove single & double quote
   let escaped_body = body.replace(&['\"', '\''][..], "");
 
+  let (tx, rx) = channel();
+
   // todo(lemarier): We should review this and make sure we have
   // something more conventional.
-  let should_install = ask(
+  ask(
+    Some(&window),
     format!(r#"A new version of {} is available! "#, app_name),
     format!(
       r#"{} {} is now available -- you have {}.
@@ -539,36 +547,27 @@ Release Notes:
 {}"#,
       app_name, updater.version, updater.current_version, escaped_body,
     ),
+    move |should_install| tx.send(should_install).unwrap(),
   );
 
-  match should_install {
-    AskResponse::Yes => {
-      // Launch updater download process
-      // macOS we display the `Ready to restart dialog` asking to restart
-      // Windows is closing the current App and launch the downloaded MSI when ready (the process stop here)
-      // Linux we replace the AppImage by launching a new install, it start a new AppImage instance, so we're closing the previous. (the process stop here)
-      updater.download_and_install(pubkey.clone()).await?;
+  if rx.recv().unwrap() {
+    // Launch updater download process
+    // macOS we display the `Ready to restart dialog` asking to restart
+    // Windows is closing the current App and launch the downloaded MSI when ready (the process stop here)
+    // Linux we replace the AppImage by launching a new install, it start a new AppImage instance, so we're closing the previous. (the process stop here)
+    updater.download_and_install(pubkey.clone()).await?;
 
-      // Ask user if we need to restart the application
-      let should_exit = ask(
-        "Ready to Restart",
-        "The installation was successful, do you want to restart the application now?",
-      );
-      match should_exit {
-        AskResponse::Yes => {
+    // Ask user if we need to restart the application
+    ask(
+      Some(&window),
+      "Ready to Restart",
+      "The installation was successful, do you want to restart the application now?",
+      |should_exit| {
+        if should_exit {
           restart();
-          // safely exit even if the process
-          // should be killed
-          return Ok(());
         }
-        AskResponse::No => {
-          // Do nothing -- maybe we can emit some event here
-        }
-      }
-    }
-    AskResponse::No => {
-      // Do nothing -- maybe we can emit some event here
-    }
+      },
+    );
   }
 
   Ok(())

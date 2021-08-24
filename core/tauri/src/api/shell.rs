@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-/// Open path or URL with `with`, or system default
+//! Types and functions related to shell.
+
+/// Opens path or URL with program specified in `with`, or system default if `None`.
 pub fn open(path: String, with: Option<String>) -> crate::api::Result<()> {
   {
     let exit_status = if let Some(with) = with {
@@ -10,18 +12,7 @@ pub fn open(path: String, with: Option<String>) -> crate::api::Result<()> {
     } else {
       open::that(&path)
     };
-    match exit_status {
-      Ok(status) => {
-        if status.success() {
-          Ok(())
-        } else {
-          Err(crate::api::Error::Shell("open command failed".into()))
-        }
-      }
-      Err(err) => Err(crate::api::Error::Shell(format!(
-        "failed to open: {}",
-        err.to_string()
-      ))),
-    }
+    exit_status
+      .map_err(|err| crate::api::Error::Shell(format!("failed to open: {}", err.to_string())))
   }
 }

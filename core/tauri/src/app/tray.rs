@@ -78,6 +78,7 @@ pub enum SystemTrayEvent {
 
 /// A handle to a system tray. Allows updating the context menu items.
 #[default_runtime(crate::Wry, wry)]
+#[derive(Debug)]
 pub struct SystemTrayHandle<R: Runtime> {
   pub(crate) ids: Arc<HashMap<MenuHash, MenuId>>,
   pub(crate) inner: R::TrayHandler,
@@ -94,6 +95,7 @@ impl<R: Runtime> Clone for SystemTrayHandle<R> {
 
 /// A handle to a system tray menu item.
 #[default_runtime(crate::Wry, wry)]
+#[derive(Debug)]
 pub struct SystemTrayMenuItemHandle<R: Runtime> {
   id: MenuHash,
   tray_handler: R::TrayHandler,
@@ -109,6 +111,7 @@ impl<R: Runtime> Clone for SystemTrayMenuItemHandle<R> {
 }
 
 impl<R: Runtime> SystemTrayHandle<R> {
+  /// Gets a handle to the menu item that has the specified `id`.
   pub fn get_item(&self, id: MenuIdRef<'_>) -> SystemTrayMenuItemHandle<R> {
     for (raw, item_id) in self.ids.iter() {
       if item_id == id {
@@ -124,6 +127,15 @@ impl<R: Runtime> SystemTrayHandle<R> {
   /// Updates the tray icon. Must be a [`Icon::File`] on Linux and a [`Icon::Raw`] on Windows and macOS.
   pub fn set_icon(&self, icon: Icon) -> crate::Result<()> {
     self.inner.set_icon(icon).map_err(Into::into)
+  }
+
+  /// Support [macOS tray icon template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc) to adjust automatically based on taskbar color.
+  #[cfg(target_os = "macos")]
+  pub fn set_icon_as_template(&self, is_template: bool) -> crate::Result<()> {
+    self
+      .inner
+      .set_icon_as_template(is_template)
+      .map_err(Into::into)
   }
 }
 

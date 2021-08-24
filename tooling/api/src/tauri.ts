@@ -19,6 +19,10 @@ declare global {
   }
 }
 
+// the `__TAURI_INVOKE_KEY__` variable is injected at runtime by Tauri
+// eslint-disable-next-line @typescript-eslint/naming-convention
+declare let __TAURI_INVOKE_KEY__: number
+
 /** @ignore */
 function uid(): string {
   const length = new Int8Array(1)
@@ -79,7 +83,6 @@ async function invoke<T>(cmd: string, args: InvokeArgs = {}): Promise<T> {
     }, true)
 
     window.rpc.notify(cmd, {
-      // @ts-expect-error the `__TAURI_INVOKE_KEY__` variable is injected at runtime by Tauri
       __invokeKey: __TAURI_INVOKE_KEY__,
       callback,
       error,
@@ -98,7 +101,7 @@ async function invoke<T>(cmd: string, args: InvokeArgs = {}): Promise<T> {
  */
 function convertFileSrc(filePath: string): string {
   return navigator.userAgent.includes('Windows')
-    ? `https://custom.protocol.asset_${filePath}`
+    ? `https://asset.localhost/${filePath}`
     : `asset://${filePath}`
 }
 

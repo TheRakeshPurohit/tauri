@@ -6,10 +6,6 @@
   all(not(debug_assertions), target_os = "windows"),
   windows_subsystem = "windows"
 )]
-#![allow(
-    // Clippy bug: https://github.com/rust-lang/rust-clippy/issues/7422
-    clippy::nonstandard_macro_braces,
-)]
 
 use tauri::WindowBuilder;
 
@@ -28,6 +24,8 @@ fn main() {
         (window_builder.title("Tauri - Rust"), webview_attributes)
       },
     )
-    .run(tauri::generate_context!())
+    .run(tauri::generate_context!(
+      "../../examples/multiwindow/src-tauri/tauri.conf.json"
+    ))
     .expect("failed to run tauri application");
 }

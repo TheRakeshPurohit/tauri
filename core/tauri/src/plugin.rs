@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! Extend Tauri functionality.
+//! The Tauri plugin extension to expand Tauri functionality.
 
-use crate::{api::config::PluginConfig, runtime::Runtime, App, Invoke, PageLoadPayload, Window};
+use crate::{
+  runtime::Runtime, utils::config::PluginConfig, AppHandle, Invoke, PageLoadPayload, Window,
+};
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
-
 use tauri_macros::default_runtime;
 
-/// The plugin result type.
+use std::{collections::HashMap, fmt};
+
+/// The result type of Tauri plugin module.
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// The plugin interface.
@@ -18,9 +20,9 @@ pub trait Plugin<R: Runtime>: Send {
   /// The plugin name. Used as key on the plugin config object.
   fn name(&self) -> &'static str;
 
-  /// Initialize the plugin.
+  /// Initializes the plugin.
   #[allow(unused_variables)]
-  fn initialize(&mut self, app: &App<R>, config: JsonValue) -> Result<()> {
+  fn initialize(&mut self, app: &AppHandle<R>, config: JsonValue) -> Result<()> {
     Ok(())
   }
 
@@ -37,11 +39,11 @@ pub trait Plugin<R: Runtime>: Send {
   #[allow(unused_variables)]
   fn created(&mut self, window: Window<R>) {}
 
-  /// Callback invoked when the webview performs a navigation.
+  /// Callback invoked when the webview performs a navigation to a page.
   #[allow(unused_variables)]
   fn on_page_load(&mut self, window: Window<R>, payload: PageLoadPayload) {}
 
-  /// Add invoke_handler API extension commands.
+  /// Extend commands to [`crate::Builder::invoke_handler`].
   #[allow(unused_variables)]
   fn extend_api(&mut self, invoke: Invoke<R>) {}
 }
@@ -50,6 +52,14 @@ pub trait Plugin<R: Runtime>: Send {
 #[default_runtime(crate::Wry, wry)]
 pub(crate) struct PluginStore<R: Runtime> {
   store: HashMap<&'static str, Box<dyn Plugin<R>>>,
+}
+
+impl<R: Runtime> fmt::Debug for PluginStore<R> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("PluginStore")
+      .field("plugins", &self.store.keys())
+      .finish()
+  }
 }
 
 impl<R: Runtime> Default for PluginStore<R> {
@@ -69,7 +79,11 @@ impl<R: Runtime> PluginStore<R> {
   }
 
   /// Initializes all plugins in the store.
-  pub(crate) fn initialize(&mut self, app: &App<R>, config: &PluginConfig) -> crate::Result<()> {
+  pub(crate) fn initialize(
+    &mut self,
+    app: &AppHandle<R>,
+    config: &PluginConfig,
+  ) -> crate::Result<()> {
     self.store.values_mut().try_for_each(|plugin| {
       plugin
         .initialize(

@@ -12,13 +12,11 @@ use tauri_macros::default_runtime;
 use std::collections::HashMap;
 
 /// The window menu event.
-#[cfg_attr(doc_cfg, doc(cfg(feature = "menu")))]
 #[derive(Debug, Clone)]
 pub struct MenuEvent {
   pub(crate) menu_item_id: MenuId,
 }
 
-#[cfg(feature = "menu")]
 impl MenuEvent {
   /// The menu item id.
   pub fn menu_item_id(&self) -> MenuIdRef<'_> {
@@ -28,6 +26,7 @@ impl MenuEvent {
 
 /// A handle to a system tray. Allows updating the context menu items.
 #[default_runtime(crate::Wry, wry)]
+#[derive(Debug)]
 pub struct MenuHandle<R: Runtime> {
   pub(crate) ids: HashMap<MenuHash, MenuId>,
   pub(crate) dispatcher: R::Dispatcher,
@@ -44,6 +43,7 @@ impl<R: Runtime> Clone for MenuHandle<R> {
 
 /// A handle to a system tray menu item.
 #[default_runtime(crate::Wry, wry)]
+#[derive(Debug)]
 pub struct MenuItemHandle<R: Runtime> {
   id: u16,
   dispatcher: R::Dispatcher,
@@ -86,8 +86,10 @@ impl<R: Runtime> MenuHandle<R> {
   ///
   /// # Panics
   ///
-  /// Panics if the app is not running yet, usually when called on the [`setup`](crate::Builder#method.setup) closure.
-  /// You can spawn a task to use the API using the [`async_runtime`](crate::async_runtime) to prevent the panic.
+  /// - Panics if the event loop is not running yet, usually when called on the [`setup`](crate::Builder#method.setup) closure.
+  /// - Panics when called on the main thread, usually on the [`run`](crate::App#method.run) closure.
+  ///
+  /// You can spawn a task to use the API using [`crate::async_runtime::spawn`] or [`std::thread::spawn`] to prevent the panic.
   pub fn is_visible(&self) -> crate::Result<bool> {
     self.dispatcher.is_menu_visible().map_err(Into::into)
   }
@@ -96,8 +98,10 @@ impl<R: Runtime> MenuHandle<R> {
   ///
   /// # Panics
   ///
-  /// Panics if the app is not running yet, usually when called on the [`setup`](crate::Builder#method.setup) closure.
-  /// You can spawn a task to use the API using the [`async_runtime`](crate::async_runtime) to prevent the panic.
+  /// - Panics if the event loop is not running yet, usually when called on the [`setup`](crate::Builder#method.setup) closure.
+  /// - Panics when called on the main thread, usually on the [`run`](crate::App#method.run) closure.
+  ///
+  /// You can spawn a task to use the API using [`crate::async_runtime::spawn`] or [`std::thread::spawn`] to prevent the panic.
   pub fn toggle(&self) -> crate::Result<()> {
     if self.is_visible()? {
       self.hide()

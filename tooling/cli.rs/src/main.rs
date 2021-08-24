@@ -2,11 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-#![allow(
-    // Clippy bug: https://github.com/rust-lang/rust-clippy/issues/7422
-    clippy::nonstandard_macro_braces,
-)]
-
 pub use anyhow::Result;
 use clap::{crate_version, load_yaml, App, AppSettings, ArgMatches};
 use dialoguer::Input;
@@ -269,10 +264,10 @@ fn main() -> Result<()> {
   let app = App::from(yaml)
     .version(crate_version!())
     .setting(AppSettings::ArgRequiredElseHelp)
-    .setting(AppSettings::GlobalVersion)
-    .setting(AppSettings::SubcommandRequired);
-  let app_matches = app.get_matches();
-  let matches = app_matches.subcommand_matches("tauri").unwrap();
+    .setting(AppSettings::PropagateVersion)
+    .setting(AppSettings::SubcommandRequired)
+    .arg(clap::Arg::new("cargo").hidden(true).possible_value("tauri"));
+  let matches = app.get_matches();
 
   if let Some(matches) = matches.subcommand_matches("init") {
     init_command(matches)?;

@@ -11,26 +11,23 @@
 //! The following are a list of Cargo features that can be enabled or disabled:
 //!
 //! - **wry** *(enabled by default)*: Enables the [wry](https://github.com/tauri-apps/wry) runtime. Only disable it if you want a custom runtime.
-//! - **menu**: Enables application menus support.
 //! - **reqwest-client**: Uses `reqwest` as HTTP client on the `http` APIs. Improves performance, but increases the bundle size.
 //! - **cli**: Enables usage of `clap` for CLI argument parsing. Enabled by default if the `cli` config is defined on the `tauri.conf.json` file.
 //! - **system-tray**: Enables application system tray API. Enabled by default if the `systemTray` config is defined on the `tauri.conf.json` file.
 //! - **updater**: Enables the application auto updater. Enabled by default if the `updater` config is defined on the `tauri.conf.json` file.
 
-#![allow(
-    // Clippy bug: https://github.com/rust-lang/rust-clippy/issues/7422
-    clippy::nonstandard_macro_braces,
-)]
 #![warn(missing_docs, rust_2018_idioms)]
 #![cfg_attr(doc_cfg, feature(doc_cfg))]
 
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use embed_plist;
 /// The Tauri error enum.
 pub use error::Error;
 pub use tauri_macros::{command, generate_handler};
 
 pub mod api;
 pub(crate) mod app;
-/// Async runtime.
 pub mod async_runtime;
 pub mod command;
 /// The Tauri API endpoints.
@@ -40,16 +37,18 @@ mod event;
 mod hooks;
 mod manager;
 pub mod plugin;
-/// Tauri window.
 pub mod window;
 use tauri_runtime as runtime;
-/// The Tauri-specific settings for your runtime e.g. notification permission status.
 pub mod settings;
 mod state;
 #[cfg(feature = "updater")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "updater")))]
 pub mod updater;
 
+pub use tauri_utils as utils;
+
 #[cfg(feature = "wry")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "wry")))]
 pub use tauri_runtime_wry::Wry;
 
 /// `Result<T, ::tauri::Error>`
@@ -63,27 +62,31 @@ use crate::{
   runtime::window::PendingWindow,
 };
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 // Export types likely to be used by the application.
-#[cfg(any(feature = "menu", feature = "system-tray"))]
-#[cfg_attr(doc_cfg, doc(cfg(any(feature = "menu", feature = "system-tray"))))]
-pub use runtime::menu::CustomMenuItem;
+pub use runtime::{http, menu::CustomMenuItem};
 
-#[cfg(all(target_os = "macos", any(feature = "menu", feature = "system-tray")))]
-#[cfg_attr(
-  doc_cfg,
-  doc(cfg(all(target_os = "macos", any(feature = "menu", feature = "system-tray"))))
-)]
-pub use runtime::menu::NativeImage;
+#[cfg(target_os = "macos")]
+#[cfg_attr(doc_cfg, doc(cfg(target_os = "macos")))]
+pub use runtime::{menu::NativeImage, ActivationPolicy};
 
+#[cfg(feature = "system-tray")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "system-tray")))]
 pub use {
-  self::api::assets::Assets,
-  self::api::{
-    config::{Config, WindowUrl},
-    PackageInfo,
+  self::app::tray::{SystemTrayEvent, SystemTrayHandle},
+  self::runtime::{
+    menu::{SystemTrayMenu, SystemTrayMenuItem, SystemTraySubmenu},
+    SystemTray,
   },
-  self::app::{App, AppHandle, Builder, CloseRequestApi, Event, GlobalWindowEvent},
+};
+pub use {
+  self::app::WindowMenuEvent,
+  self::runtime::menu::{Menu, MenuItem, Submenu},
+  self::window::menu::MenuEvent,
+};
+pub use {
+  self::app::{App, AppHandle, Builder, CloseRequestApi, Event, GlobalWindowEvent, PathResolver},
   self::hooks::{
     Invoke, InvokeError, InvokeHandler, InvokeMessage, InvokeResolver, InvokeResponse, OnPageLoad,
     PageLoadPayload, SetupHook,
@@ -94,26 +97,15 @@ pub use {
       dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Pixel, Position, Size},
       WindowEvent,
     },
-    Icon, RunIteration, Runtime, UserAttentionType,
+    ClipboardManager, GlobalShortcutManager, Icon, RunIteration, Runtime, UserAttentionType,
   },
   self::state::{State, StateManager},
-  self::window::{Monitor, Window},
-};
-#[cfg(feature = "system-tray")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "system-tray")))]
-pub use {
-  self::app::tray::SystemTrayEvent,
-  self::runtime::{
-    menu::{SystemTrayMenu, SystemTrayMenuItem, SystemTraySubmenu},
-    SystemTray,
+  self::utils::{
+    assets::Assets,
+    config::{Config, WindowUrl},
+    PackageInfo,
   },
-};
-#[cfg(feature = "menu")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "menu")))]
-pub use {
-  self::app::WindowMenuEvent,
-  self::runtime::menu::{Menu, MenuItem, Submenu},
-  self::window::menu::MenuEvent,
+  self::window::{Monitor, Window},
 };
 
 /// Reads the config file at compile time and generates a [`Context`] based on its content.
@@ -160,7 +152,19 @@ pub struct Context<A: Assets> {
   pub(crate) assets: Arc<A>,
   pub(crate) default_window_icon: Option<Vec<u8>>,
   pub(crate) system_tray_icon: Option<Icon>,
-  pub(crate) package_info: crate::api::PackageInfo,
+  pub(crate) package_info: crate::PackageInfo,
+  pub(crate) _info_plist: (),
+}
+
+impl<A: Assets> fmt::Debug for Context<A> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("Context")
+      .field("config", &self.config)
+      .field("default_window_icon", &self.default_window_icon)
+      .field("system_tray_icon", &self.system_tray_icon)
+      .field("package_info", &self.package_info)
+      .finish()
+  }
 }
 
 impl<A: Assets> Context<A> {
@@ -214,13 +218,13 @@ impl<A: Assets> Context<A> {
 
   /// Package information.
   #[inline(always)]
-  pub fn package_info(&self) -> &crate::api::PackageInfo {
+  pub fn package_info(&self) -> &crate::PackageInfo {
     &self.package_info
   }
 
   /// A mutable reference to the package information.
   #[inline(always)]
-  pub fn package_info_mut(&mut self) -> &mut crate::api::PackageInfo {
+  pub fn package_info_mut(&mut self) -> &mut crate::PackageInfo {
     &mut self.package_info
   }
 
@@ -231,7 +235,8 @@ impl<A: Assets> Context<A> {
     assets: Arc<A>,
     default_window_icon: Option<Vec<u8>>,
     system_tray_icon: Option<Icon>,
-    package_info: crate::api::PackageInfo,
+    package_info: crate::PackageInfo,
+    info_plist: (),
   ) -> Self {
     Self {
       config,
@@ -239,6 +244,7 @@ impl<A: Assets> Context<A> {
       default_window_icon,
       system_tray_icon,
       package_info,
+      _info_plist: info_plist,
     }
   }
 }
@@ -308,12 +314,20 @@ pub trait Manager<R: Runtime>: sealed::ManagerBase<R> {
     self.manager().state().set(state);
   }
 
-  /// Gets the managed state for the type `T`.
+  /// Gets the managed state for the type `T`. Panics if the type is not managed.
   fn state<T>(&self) -> State<'_, T>
   where
     T: Send + Sync + 'static,
   {
     self.manager().inner.state.get()
+  }
+
+  /// Tries to get the managed state for the type `T`. Returns `None` if the type is not managed.
+  fn try_state<T>(&self) -> Option<State<'_, T>>
+  where
+    T: Send + Sync + 'static,
+  {
+    self.manager().inner.state.try_get()
   }
 }
 

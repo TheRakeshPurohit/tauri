@@ -5,12 +5,12 @@
 #[cfg(window_create)]
 use crate::runtime::{webview::WindowBuilder, Dispatch};
 use crate::{
-  api::config::WindowConfig,
   endpoints::InvokeResponse,
   runtime::{
     window::dpi::{Position, Size},
     Runtime, UserAttentionType,
   },
+  utils::config::WindowConfig,
   Manager, Window,
 };
 use serde::Deserialize;
@@ -80,6 +80,9 @@ pub enum WindowManagerCmd {
   SetSkipTaskbar(bool),
   StartDragging,
   Print,
+  // internals
+  #[serde(rename = "__toggleMaximize")]
+  InternalToggleMaximize,
 }
 
 /// The API descriptor.
@@ -179,6 +182,15 @@ impl Cmd {
           WindowManagerCmd::SetSkipTaskbar(skip) => window.set_skip_taskbar(skip)?,
           WindowManagerCmd::StartDragging => window.start_dragging()?,
           WindowManagerCmd::Print => window.print()?,
+          // internals
+          WindowManagerCmd::InternalToggleMaximize => {
+            if window.is_resizable()? {
+              match window.is_maximized()? {
+                true => window.unmaximize()?,
+                false => window.maximize()?,
+              }
+            }
+          }
         }
       }
     }

@@ -6,10 +6,6 @@
   all(not(debug_assertions), target_os = "windows"),
   windows_subsystem = "windows"
 )]
-#![allow(
-    // Clippy bug: https://github.com/rust-lang/rust-clippy/issues/7422
-    clippy::nonstandard_macro_braces,
-)]
 
 use tauri::{
   api::process::{Command, CommandEvent},
@@ -43,6 +39,8 @@ fn main() {
 
       Ok(())
     })
-    .run(tauri::generate_context!())
+    .run(tauri::generate_context!(
+      "../../examples/sidecar/src-tauri/tauri.conf.json"
+    ))
     .expect("error while running tauri application");
 }
