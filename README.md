@@ -21,7 +21,7 @@ To learn more about the details of how all of these pieces fit together, please 
 
 If you are interested in making a tauri app, please visit the [documentation website](https://tauri.app).
 
-The quickest way to get started is to install the [prerequisites](https://tauri.app/v1/guides/getting-started/prerequisites) for your system and create a new project with [`create-tauri-app`](https://github.com/tauri-apps/create-tauri-app/#usage). For example with `npm`:
+The quickest way to get started is to install the [prerequisites](https://v2.tauri.app/start/prerequisites/) for your system and create a new project with [`create-tauri-app`](https://github.com/tauri-apps/create-tauri-app/#usage). For example with `npm`:
 
 ```sh
 npm create tauri-app@latest
@@ -35,7 +35,7 @@ The list of Tauri's features includes, but is not limited to:
 - Built-in self updater (desktop only)
 - System tray icons
 - Native notifications
-- [Localhost free (🔥)](https://github.com/tauri-apps/tauri/issues/10510)
+- Native WebView Protocol (tauri doesn't create a localhost http(s) server to serve the WebView contents)
 - GitHub action for streamlined CI
 - VS Code extension
 
